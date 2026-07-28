@@ -1,6 +1,6 @@
-# swap_ref — VCF Reference Swapping Tool
+# swap_ref — Reorient a Multi-Sample VCF to a Selected Sample
 
-**One-liner**: pick any sample in a VCF as the new reference genome, and turn the original reference into a sample column.
+**Reorient VCF REF/ALT alleles using a selected sample's genotype as the new reference allele state.** The original reference genome is preserved as an extra sample column.
 
 > [中文版](README_CN.md)
 
@@ -14,7 +14,7 @@ python3 -c "import gzip; f=gzip.open('toy.vcf.gz','rt');
 # 2. Pick a sample and run (no extra flags needed)
 python3 swap_ref.py toy.vcf.gz --sample 1_H3
 
-# 3. Verify correctness
+# 3. Verify correctness (distance matrix + tree topology + round-trip)
 python3 verify_swap.py toy.vcf.gz --swap --sample 1_H3
 ```
 
@@ -25,66 +25,62 @@ Say you pick sample `1_H3`. At each variant site:
 | 1_H3 genotype | Meaning | Result |
 |---|---|---|
 | `0/0` | Same as reference | Unchanged |
-| `1/1` | Homozygous ALT | **Swap**: ALT becomes new REF, old REF becomes ALT |
-| `0/1` | Heterozygous (both alleles) | **Unchanged**: sample is uncertain, can't define a single "reference" |
+| `1/1` | Homozygous ALT | **Swap**: ALT → new REF, old REF → new ALT |
+| `0/1` | Heterozygous | Unchanged (sample carries both alleles) |
 | `./.` | Missing | Skipped |
 
-After swapping, the VCF gains one extra column: `ORIGINAL_REF` — the original reference genome's genotypes.
+After reorientation, the VCF gains one extra column: `ORIGINAL_REF` — the original reference genome as a pseudo-sample.
 
 ## No Flags Needed
-
-For most use cases, the defaults are all you need:
 
 ```bash
 python3 swap_ref.py input.vcf.gz --sample SAMPLE
 ```
 
-## What Are `--iupac` and `--force`? (Optional)
+## Optional Flags for Heterozygous Sites
 
-These only affect **heterozygous sites** (where the sample's genotype is `0/1`).
+By default, heterozygous sites (`0/1`) are left unchanged — the sample carries both alleles, so there's no single allele to define as reference. These flags override that behavior:
 
-By default, heterozygous sites are left alone — the sample carries both alleles, so there's no single "reference" to define. If you insist on changing the reference even at these sites, you must decide: **which allele should become the new REF?**
-
-| Flag | Strategy | Example |
-|------|----------|---------|
-| (default, no flag) | Leave heterozygous sites unchanged | REF=A, ALT=G, sample 0/1 → REF stays A |
-| `--iupac` | Use IUPAC ambiguity code for both alleles | sample 0/1 (A/G) → REF becomes `R` (=A or G) |
-| `--force` | Use allele depth: the allele with more reads becomes REF | sample 0/1, AD=3,15 → ALT has higher depth → REF becomes G |
-
-**When to use them?**
-- `--iupac`: you want the REF column to honestly reflect "this sample is polymorphic here". Note: most downstream tools (bwa, GATK) don't handle IUPAC bases — use with caution.
-- `--force`: you don't care about heterozygosity and just want to maximize the number of swapped sites.
-- Neither: safe default, works for virtually all use cases.
+| Flag | Strategy | When to use |
+|------|----------|-------------|
+| (none) | Leave het sites unchanged | **Default. Works for virtually all cases.** |
+| `--force` | Pick the allele with higher sequencing depth | You want maximum swaps; heuristic, does not infer phase |
+| `--iupac` | Encode both alleles as IUPAC code (A/G→R) | Experimental. Produces non-standard VCF; most tools won't handle it |
 
 ## Output
 
 - Auto-named: `toy_ref-1_H3.vcf.gz` (`<input>_ref-<sample>.vcf.gz`)
-- One extra column `ORIGINAL_REF` — the original reference genome's genotypes
 - VCF header records the sample used: `##swapRef_Sample=<ID=1_H3,...>`
+- PL fields are dropped (no longer valid after allele reordering). Regenerate with `bcftools +fill-tags`.
 
 ## Verification
 
-Allele re-encoding is a bijection — allele-sharing between samples is preserved:
+Allele re-encoding is a bijection — allele-sharing between samples is preserved, so:
 
-```
-IBS distance matrix (original)  ==  IBS distance matrix (swapped)
-              ↓                              ↓
-         clustering tree               clustering tree
-              ↓                              ↓
-          topology          ===          topology
-```
+- IBS distance matrix is **identical** (correlation = 1.0)
+- Tree topology is **identical** (cophenetic correlation = 1.0)
+- **Round-trip**: swap → inverse swap restores the original VCF exactly
 
-Same distances → same tree. `verify_swap.py` runs this check automatically.
+`verify_swap.py` runs all three checks automatically.
+
+## Important: This is NOT a Genome Liftover
+
+This tool reorients **VCF allele definitions**, not genomic coordinates. It does not:
+
+- Change CHROM, POS, or coordinate systems
+- Generate new FASTA sequences
+- Remap reads or call variants against a new assembly
+
+For coordinate-based liftover between assemblies, use CrossMap, Picard LiftoverVcf, or bcftools + chain files.
 
 ## All Options
 
 ```
 python3 swap_ref.py input.vcf.gz \
-    --sample SAMPLE        # required: sample to use as new reference
+    --sample SAMPLE        # required
     -o output.vcf.gz       # output file (auto-named if omitted)
-    --iupac                # optional: IUPAC ambiguity codes at heterozygous sites
-    --force                # optional: use AD to pick major allele at heterozygous sites
-    --new-sample-name NAME # name for original-reference column (default: ORIGINAL_REF)
-    --keep-pl              # preserve PL fields
+    --force                # optional: use AD at heterozygous sites (heuristic)
+    --iupac                # optional: [EXPERIMENTAL] IUPAC codes at het sites
+    --new-sample-name NAME # column name for original reference (default: ORIGINAL_REF)
     -q                     # quiet mode
 ```

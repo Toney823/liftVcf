@@ -1,0 +1,10 @@
+# Test outputs
+*_ref-*.vcf.gz
+swapped*.vcf.gz
+restored*.vcf.gz
+iupac_*.vcf.gz
+forced*.vcf.gz
+
+# Python
+__pycache__/
+*.pyc

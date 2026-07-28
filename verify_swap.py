@@ -405,59 +405,118 @@ def verify(original_vcf, swapped_vcf, sample_name, new_sample_name='ORIGINAL_REF
 # ============================================================
 
 def swap_and_verify(input_vcf, sample_name, strategy='strict', new_sample_name='ORIGINAL_REF',
-                    keep_pl=False, quiet=False):
+                    quiet=False):
     """
-    执行 swap 然后立即验证。
+    执行 swap → 验证 → round-trip 测试。
     """
     import tempfile
     import os
     import subprocess
+    import shutil
 
-    # 创建临时输出文件
     tmpdir = tempfile.mkdtemp(prefix='swap_verify_')
     output_vcf = os.path.join(tmpdir, 'swapped.vcf.gz')
+    restored_vcf = os.path.join(tmpdir, 'restored.vcf.gz')
 
     log = lambda msg: not quiet and print(msg, file=sys.stderr)
-    log(f"临时目录: {tmpdir}")
-
-    # 运行 swap_ref
     script_dir = os.path.dirname(os.path.abspath(__file__))
     swap_script = os.path.join(script_dir, 'swap_ref.py')
 
-    cmd = [
-        sys.executable, swap_script,
-        input_vcf,
-        '--sample', sample_name,
-        '-o', output_vcf,
-        '--new-sample-name', new_sample_name,
-    ]
+    def run_swap(input_file, sample, out, ref_name, extra_args=None):
+        cmd = [sys.executable, swap_script, input_file, '--sample', sample,
+               '-o', out, '--new-sample-name', ref_name, '-q']
+        if extra_args:
+            cmd.extend(extra_args)
+        result = subprocess.run(cmd, capture_output=True, text=True,
+                                encoding='utf-8', errors='replace')
+        if result.returncode != 0:
+            print(f"ERROR: swap_ref failed:\n{result.stderr}", file=sys.stderr)
+            return False
+        return True
+
+    # Step 1: swap to chosen sample → adds ORIGINAL_REF column
+    extra = []
     if strategy == 'iupac':
-        cmd.append('--iupac')
+        extra.append('--iupac')
     elif strategy == 'force':
-        cmd.append('--force')
-    if keep_pl:
-        cmd.append('--keep-pl')
-    if quiet:
-        cmd.append('--quiet')
-
-    log(f"运行: {' '.join(cmd)}")
-    result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
-
-    if result.returncode != 0:
-        print(f"ERROR: swap_ref failed:\n{result.stderr}", file=sys.stderr)
+        extra.append('--force')
+    if not run_swap(input_vcf, sample_name, output_vcf, new_sample_name, extra):
+        shutil.rmtree(tmpdir, ignore_errors=True)
         return False
 
-    if not quiet:
-        print(result.stderr)
+    # Step 2: verify distance matrix + tree topology
+    ok1 = verify(input_vcf, output_vcf, sample_name, new_sample_name, quiet=quiet)
 
-    # 验证
-    ok = verify(input_vcf, output_vcf, sample_name, new_sample_name, quiet=quiet)
+    # Step 3: round-trip — swap ORIGINAL_REF back
+    # Use a temp name for the second pass to avoid column name collision
+    roundtrip_ref = '_ROUNDTRIP_TMP'
+    log(f"\n{'='*60}")
+    log(f"  Round-trip 测试: 交换后 VCF → 以 {new_sample_name} 为目标还原")
+    log(f"{'='*60}")
+    if not run_swap(output_vcf, new_sample_name, restored_vcf, roundtrip_ref):
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        return False
 
-    # 清理
-    import shutil
+    # Compare: exclude the temp column, the rest should match original
+    ok2 = verify_round_trip(input_vcf, restored_vcf, sample_name, new_sample_name, roundtrip_ref, quiet=quiet)
+
     shutil.rmtree(tmpdir, ignore_errors=True)
+    return ok1 and ok2
 
-    return ok
+
+def verify_round_trip(original_vcf, restored_vcf, orig_sample, ref_sample_name,
+                      temp_column, quiet=False):
+    """
+    Check round-trip: original == swap(swap(original, sample_A), ORIGINAL_REF).
+    The restored VCF has an extra temp column that we exclude from comparison.
+    """
+    log = lambda msg: not quiet and print(msg, file=sys.stderr)
+    all_ok = True
+
+    orig_samples, orig_alleles = load_allele_matrix(original_vcf)
+    rest_samples, rest_alleles = load_allele_matrix(restored_vcf)
+
+    # Remove temp column from restored data
+    if temp_column in rest_samples:
+        tmp_idx = rest_samples.index(temp_column)
+        rest_samples = [s for s in rest_samples if s != temp_column]
+        rest_alleles = [[a for j, a in enumerate(site) if j != tmp_idx]
+                        for site in rest_alleles]
+
+    log(f"  原始样品数: {len(orig_samples)}, 还原后样品数: {len(rest_samples)}")
+
+    n_sites = min(len(orig_alleles), len(rest_alleles))
+    n_mismatch = 0
+
+    # Compare only samples present in both
+    common_samples = list(set(orig_samples) & set(rest_samples))
+    if len(common_samples) < len(orig_samples):
+        log(f"  [INFO] {len(orig_samples) - len(common_samples)} 个样品仅在原始 VCF 中")
+
+    orig_idx = [orig_samples.index(s) for s in common_samples]
+    rest_idx = [rest_samples.index(s) for s in common_samples]
+
+    for i in range(n_sites):
+        for jo, jr in zip(orig_idx, rest_idx):
+            a = orig_alleles[i][jo] if jo < len(orig_alleles[i]) else None
+            b = rest_alleles[i][jr] if jr < len(rest_alleles[i]) else None
+            if a is None and b is None:
+                continue
+            if a != b:
+                n_mismatch += 1
+
+    if n_mismatch == 0:
+        log(f"  [PASS] Round-trip: {n_sites} 位点 × {len(common_samples)} 样品 GT 完全一致")
+    else:
+        log(f"  [FAIL] Round-trip: {n_mismatch} 个 allele 不一致")
+        all_ok = False
+
+    if all_ok:
+        log(f"  [PASS] Round-trip 验证通过: swap_ref 变换可逆")
+    else:
+        log(f"  [FAIL] Round-trip 验证失败")
+
+    return all_ok
 
 
 # ============================================================
@@ -466,17 +525,12 @@ def swap_and_verify(input_vcf, sample_name, strategy='strict', new_sample_name='
 
 def main():
     parser = argparse.ArgumentParser(
-        description='验证 VCF 参考基因组互换的正确性（距离矩阵 + 树拓扑比较）',
+        description='验证 swap_ref 的正确性（IBS 距离矩阵 + 树拓扑 + round-trip）',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
-  # 单独验证
   python verify_swap.py toy.vcf.gz swapped.vcf.gz --sample 1_H3
-
-  # 一键 swap + 验证
   python verify_swap.py toy.vcf.gz --swap --sample 1_H3
-
-  # 用 force 策略 swap + 验证
   python verify_swap.py toy.vcf.gz --swap --sample 1_H3 --force
         """
     )
@@ -487,15 +541,13 @@ def main():
     parser.add_argument('--sample', '-s', required=True,
                         help='作为新参考的样品名')
     parser.add_argument('--swap', action='store_true',
-                        help='同时执行 swap 和验证（需要 swap_ref.py 在同目录）')
+                        help='同时执行 swap + verify + round-trip')
     parser.add_argument('--new-sample-name', default='ORIGINAL_REF',
                         help='原始参考列名（默认 ORIGINAL_REF）')
     parser.add_argument('--iupac', action='store_true',
                         help='swap 时使用 IUPAC 策略')
     parser.add_argument('--force', action='store_true',
                         help='swap 时使用 force 策略')
-    parser.add_argument('--keep-pl', action='store_true',
-                        help='保留 PL 字段')
     parser.add_argument('--quiet', '-q', action='store_true',
                         help='减少输出')
 
@@ -514,7 +566,6 @@ def main():
             args.original, args.sample,
             strategy=strategy,
             new_sample_name=args.new_sample_name,
-            keep_pl=args.keep_pl,
             quiet=args.quiet,
         )
     else:

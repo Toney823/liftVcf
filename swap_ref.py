@@ -1,35 +1,35 @@
 #!/usr/bin/env python3
 """
-swap_ref.py — VCF 参考基因组互换工具
-=======================================
+swap_ref.py — Reorient a multi-sample VCF to a selected sample's genotype
+=========================================================================
 
-将 VCF 文件中任意一个样品指定为"新参考基因组"：
+以指定样品的基因型为参照，重新定向多样品 VCF 的 REF/ALT 等位基因：
   - 该样品纯合非 REF 的位点：该样品的等位基因 → 新 REF，旧 REF → 新 ALT
   - 杂合位点：默认保持不动（strict 模式）
-  - 新增 "ORIGINAL_REF" 列：代表原始参考基因组在各新位点的基因型
+  - 新增 "ORIGINAL_REF" 列：原始参考基因组作为一个额外样品保留
+  - 所有样品的等位基因共享关系保持不变（IBS 距离矩阵不变）
 
 用法:
   python swap_ref.py toy.vcf.gz --sample 1_A1 -o swapped.vcf.gz
 
 选项:
   --sample NAME       目标样品名（必填）
-  -o, --output FILE   输出文件（默认 stdout）
-  --iupac             杂合位点用 IUPAC 歧义碱基编码新 REF（仅 SNP 生效）
-  --force             杂合位点按 AD 深度选主等位基因做新 REF
+  -o, --output FILE   输出文件（默认自动命名）
+  --iupac             [EXPERIMENTAL] 杂合位点用 IUPAC 歧义碱基编码 REF
+  --force             杂合位点按 AD 深度选主等位基因做新 REF（启发式，不推断相位）
   --new-sample-name   原始参考列的名称（默认 ORIGINAL_REF）
-  --keep-pl           保留 PL 字段（默认丢弃，因等位基因重排后 PL 需重新计算）
   -q, --quiet         不输出统计信息到 stderr
 
+注意: PL 字段始终丢弃（等位基因重排后需重新计算，建议用 bcftools 补算）
+
 推荐默认用法:
-  python swap_ref.py input.vcf.gz --sample SAMPLE -o output.vcf.gz
+  python swap_ref.py input.vcf.gz --sample SAMPLE
   （默认 strict 模式：仅纯合非 REF 位点交换，最安全）
 """
 
 import sys
 import gzip
 import argparse
-import re
-from collections import OrderedDict
 
 # ============================================================
 # IUPAC 碱基编码表（双碱基 → 歧义编码 & 反向查找）
@@ -89,8 +89,15 @@ def parse_gt(gt_str):
 
 
 def format_gt(alleles, sep):
-    """将等位基因元组和分隔符编码为 GT 字符串。"""
-    parts = [str(a) if a is not None else '.' for a in alleles]
+    """将等位基因元组和分隔符编码为 GT 字符串。
+    unphased '/' 按 VCF 惯例小索引在前（0/2 而非 2/0）；
+    phased '|' 保留原始顺序（相位有意义）。
+    """
+    non_missing = [a for a in alleles if a is not None]
+    missing_count = sum(1 for a in alleles if a is None)
+    if sep == '/':
+        non_missing.sort()
+    parts = [str(a) for a in non_missing] + ['.'] * missing_count
     return sep.join(parts)
 
 
@@ -297,7 +304,7 @@ def generate_original_ref_gt(old_to_new, sep='/'):
 # FORMAT 字段处理
 # ============================================================
 
-def process_format_fields(fmt_str, sample_str, old_to_new, keep_pl):
+def process_format_fields(fmt_str, sample_str, old_to_new):
     """
     处理单个样品的 FORMAT 字段。
     返回新的 sample 字符串。
@@ -325,11 +332,9 @@ def process_format_fields(fmt_str, sample_str, old_to_new, keep_pl):
             else:
                 new_val = val
         elif key == 'PL':
-            # PL 需要复杂的重排，默认丢弃
-            if keep_pl:
-                new_val = val  # 用户明确要求保留
-            else:
-                new_val = '.'  # 丢弃
+            # PL 丢弃：等位基因重排后 PL 的 genotype combination ordering 不再有效
+            # 建议用户用 bcftools +fill-tags 重新计算
+            new_val = '.'
         else:
             new_val = val
         new_values.append(new_val)
@@ -342,7 +347,7 @@ def process_format_fields(fmt_str, sample_str, old_to_new, keep_pl):
 # ============================================================
 
 def process_vcf(input_path, output_path, sample_name, strategy,
-                new_sample_name, keep_pl, quiet):
+                new_sample_name, quiet):
     """处理 VCF 文件的主函数。"""
     # 统计计数器
     stats = {'swap': 0, 'unchanged': 0, 'iupac': 0, 'skipped': 0, 'total': 0}
@@ -418,16 +423,16 @@ def process_vcf(input_path, output_path, sample_name, strategy,
             f'Date="{datetime.datetime.now().strftime("%B %d, %Y at %I:%M:%S %p %Z")}">\n'
         )
 
-        # 更新 FORMAT header（如果丢弃 PL）
-        if not keep_pl:
-            for hl in header_lines:
-                if hl.startswith('##FORMAT=<ID=PL,'):
-                    outfile.write(
-                        '##FORMAT=<ID=PL,Number=.,Type=String,'
-                        'Description="PL field dropped by swap_ref — '
-                        'no longer valid after allele reordering">\n'
-                    )
-                    break
+        # PL 始终丢弃，更新 FORMAT header
+        for hl in header_lines:
+            if hl.startswith('##FORMAT=<ID=PL,'):
+                outfile.write(
+                    '##FORMAT=<ID=PL,Number=.,Type=String,'
+                    'Description="PL field dropped by swap_ref — '
+                    'no longer valid after allele reordering. '
+                    'Regenerate with bcftools +fill-tags">\n'
+                )
+                break
 
         # 写入新 #CHROM 行（添加新样品列）
         new_sample_names = list(sample_names) + [new_sample_name]
@@ -491,7 +496,7 @@ def process_vcf(input_path, output_path, sample_name, strategy,
             # 处理每个样品
             new_sample_values = []
             for sv in sample_values:
-                new_sv = process_format_fields(fmt, sv, old_to_new, keep_pl)
+                new_sv = process_format_fields(fmt, sv, old_to_new)
                 new_sample_values.append(new_sv)
 
             # 生成 ORIGINAL_REF 样品
@@ -542,19 +547,19 @@ def process_vcf(input_path, output_path, sample_name, strategy,
 
 def main():
     parser = argparse.ArgumentParser(
-        description='VCF 参考基因组互换工具 — 指定任意样品作为新参考基因组',
+        description='Reorient 多样品 VCF 的 REF/ALT 到指定样品的等位基因状态',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
   python swap_ref.py toy.vcf.gz --sample 1_A1
     → 输出: toy_ref-1_A1.vcf.gz (自动命名)
-  python swap_ref.py toy.vcf.gz --sample 2_B3 --iupac -o iupac_out.vcf.gz
-  python swap_ref.py toy.vcf.gz --sample 3_C7 --force
+  python swap_ref.py toy.vcf.gz --sample 2_B3 -o custom.vcf.gz
 
 默认行为:
   - strict 模式：仅交换纯合非 REF 位点（最安全）
   - 输出文件名自动生成为 <input>_ref-<SAMPLE>.vcf.gz
-  - 丢弃 PL 字段，保留其他 FORMAT 字段
+  - PL 字段始终丢弃（等位基因重排后需重新计算，可用 bcftools +fill-tags 恢复）
+  - --iupac 和 --force 是可选的特殊模式，绝大多数情况不需要
         """
     )
 
@@ -568,12 +573,12 @@ def main():
 
     strategy_group = parser.add_mutually_exclusive_group()
     strategy_group.add_argument('--iupac', action='store_true',
-                                help='杂合位点用 IUPAC 歧义碱基编码新 REF（仅 SNP）')
+                                help='[EXPERIMENTAL] 杂合位点用 IUPAC 歧义碱基编码 REF（仅 SNP；'
+                                     '产出非标准 VCF，下游工具可能不兼容）')
     strategy_group.add_argument('--force', action='store_true',
-                                help='杂合位点按 AD 深度选主等位基因做新 REF')
+                                help='杂合位点按 AD 深度选主等位基因做新 REF'
+                                     '（启发式方法，不推断真实相位）')
 
-    parser.add_argument('--keep-pl', action='store_true',
-                        help='保留 PL 字段（默认丢弃，因等位基因重排后 PL 不再有效）')
     parser.add_argument('--quiet', '-q', action='store_true',
                         help='不输出统计信息到 stderr')
 
@@ -604,7 +609,6 @@ def main():
         sample_name=args.sample,
         strategy=strategy,
         new_sample_name=args.new_sample_name,
-        keep_pl=args.keep_pl,
         quiet=args.quiet,
     )
 
@@ -654,7 +658,7 @@ def self_test():
     # 0→1, 1→0 (simple swap)
     swap_map = {0: 1, 1: 0}
     check("0/0→1/1", recode_gt("0/0", swap_map), "1/1")
-    check("0/1→1/0", recode_gt("0/1", swap_map), "1/0")
+    check("0/1→0/1 (sorted)", recode_gt("0/1", swap_map), "0/1")
     check("1/1→0/0", recode_gt("1/1", swap_map), "0/0")
     check("./. unchanged", recode_gt("./.", swap_map), "./.")
     check("0|1→1|0", recode_gt("0|1", swap_map), "1|0")
