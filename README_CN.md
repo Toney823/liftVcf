@@ -1,4 +1,4 @@
-# swap_ref — 以指定样品为参照重新定向多样品 VCF
+# liftVcf — 以指定样品为参照重新定向多样品 VCF
 
 **以选定样品的基因型为参照，重新定向 VCF 的 REF/ALT 等位基因。** 原始参考基因组作为一个额外样品列保留。
 
@@ -12,7 +12,7 @@ python3 -c "import gzip; f=gzip.open('toy.vcf.gz','rt');
 [print(l.split()[9]) for l in f if l.startswith('#CHROM')]; break"
 
 # 2. 选一个样品，run（不需要任何额外参数）
-python3 swap_ref.py toy.vcf.gz --sample 1_H3
+python3 liftVcf.py toy.vcf.gz --sample 1_H3
 
 # 3. 验证正确性（距离矩阵 + 树拓扑 + round-trip）
 python3 verify_swap.py toy.vcf.gz --swap --sample 1_H3
@@ -52,7 +52,7 @@ flowchart TD
 ## 不需要参数
 
 ```bash
-python3 swap_ref.py input.vcf.gz --sample 样品名
+python3 liftVcf.py input.vcf.gz --sample 样品名
 ```
 
 ## 可选参数：控制杂合位点行为
@@ -94,7 +94,7 @@ python3 swap_ref.py input.vcf.gz --sample 样品名
 ## 全部参数
 
 ```
-python3 swap_ref.py input.vcf.gz \
+python3 liftVcf.py input.vcf.gz \
     --sample SAMPLE        # 必填：作为参照的样品名
     -o output.vcf.gz       # 输出文件（默认自动命名）
     --force                # 可选：杂合位点按 AD 深度选主等位基因（启发式）

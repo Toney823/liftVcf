@@ -1,4 +1,4 @@
-# swap_ref — Reorient a Multi-Sample VCF to a Selected Sample
+# liftVcf — Reorient a Multi-Sample VCF to a Selected Sample
 
 **Reorient VCF REF/ALT alleles using a selected sample's genotype as the new reference allele state.** The original reference genome is preserved as an extra sample column.
 
@@ -12,7 +12,7 @@ python3 -c "import gzip; f=gzip.open('toy.vcf.gz','rt');
 [print(l.split()[9]) for l in f if l.startswith('#CHROM')]; break"
 
 # 2. Pick a sample and run (no extra flags needed)
-python3 swap_ref.py toy.vcf.gz --sample 1_H3
+python3 liftVcf.py toy.vcf.gz --sample 1_H3
 
 # 3. Verify correctness (distance matrix + tree topology + round-trip)
 python3 verify_swap.py toy.vcf.gz --swap --sample 1_H3
@@ -52,7 +52,7 @@ After reorientation, the VCF gains one extra column: `ORIGINAL_REF` — the orig
 ## No Flags Needed
 
 ```bash
-python3 swap_ref.py input.vcf.gz --sample SAMPLE
+python3 liftVcf.py input.vcf.gz --sample SAMPLE
 ```
 
 ## Optional Flags for Heterozygous Sites
@@ -94,7 +94,7 @@ For coordinate-based liftover between assemblies, use CrossMap, Picard LiftoverV
 ## All Options
 
 ```
-python3 swap_ref.py input.vcf.gz \
+python3 liftVcf.py input.vcf.gz \
     --sample SAMPLE        # required
     -o output.vcf.gz       # output file (auto-named if omitted)
     --force                # optional: use AD at heterozygous sites (heuristic)

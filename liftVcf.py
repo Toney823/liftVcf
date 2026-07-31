@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-swap_ref.py — Reorient a multi-sample VCF to a selected sample's genotype
+liftVcf.py — Reorient a multi-sample VCF to a selected sample's genotype
 =========================================================================
 
 以指定样品的基因型为参照，重新定向多样品 VCF 的 REF/ALT 等位基因：
@@ -10,7 +10,7 @@ swap_ref.py — Reorient a multi-sample VCF to a selected sample's genotype
   - 所有样品的等位基因共享关系保持不变（IBS 距离矩阵不变）
 
 用法:
-  python swap_ref.py toy.vcf.gz --sample 1_A1 -o swapped.vcf.gz
+  python liftVcf.py toy.vcf.gz --sample 1_A1 -o swapped.vcf.gz
 
 选项:
   --sample NAME       目标样品名（必填）
@@ -23,7 +23,7 @@ swap_ref.py — Reorient a multi-sample VCF to a selected sample's genotype
 注意: PL 字段始终丢弃（等位基因重排后需重新计算，建议用 bcftools 补算）
 
 推荐默认用法:
-  python swap_ref.py input.vcf.gz --sample SAMPLE
+  python liftVcf.py input.vcf.gz --sample SAMPLE
   （默认 strict 模式：仅纯合非 REF 位点交换，最安全）
 """
 
@@ -418,7 +418,7 @@ def process_vcf(input_path, output_path, sample_name, strategy,
             f'Description="Sample used as new reference genome">\n'
         )
         outfile.write(
-            f'##swapRef_Command=<CommandLine="swap_ref.py --sample {sample_name}'
+            f'##swapRef_Command=<CommandLine="liftVcf.py --sample {sample_name}'
             f' --strategy {strategy}",'
             f'Date="{datetime.datetime.now().strftime("%B %d, %Y at %I:%M:%S %p %Z")}">\n'
         )
@@ -428,7 +428,7 @@ def process_vcf(input_path, output_path, sample_name, strategy,
             if hl.startswith('##FORMAT=<ID=PL,'):
                 outfile.write(
                     '##FORMAT=<ID=PL,Number=.,Type=String,'
-                    'Description="PL field dropped by swap_ref — '
+                    'Description="PL field dropped by liftVcf — '
                     'no longer valid after allele reordering. '
                     'Regenerate with bcftools +fill-tags">\n'
                 )
@@ -524,7 +524,7 @@ def process_vcf(input_path, output_path, sample_name, strategy,
     # ========== 输出统计 ==========
     if not quiet:
         print(f"\n{'='*60}", file=sys.stderr)
-        print(f"  swap_ref — VCF 参考基因组互换", file=sys.stderr)
+        print(f"  liftVcf — VCF 参考基因组互换", file=sys.stderr)
         print(f"  新参考样品:      {sample_name}", file=sys.stderr)
         print(f"  策略:            {strategy}", file=sys.stderr)
         print(f"  {'-'*50}", file=sys.stderr)
@@ -551,9 +551,9 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
-  python swap_ref.py toy.vcf.gz --sample 1_A1
+  python liftVcf.py toy.vcf.gz --sample 1_A1
     → 输出: toy_ref-1_A1.vcf.gz (自动命名)
-  python swap_ref.py toy.vcf.gz --sample 2_B3 -o custom.vcf.gz
+  python liftVcf.py toy.vcf.gz --sample 2_B3 -o custom.vcf.gz
 
 默认行为:
   - strict 模式：仅交换纯合非 REF 位点（最安全）
@@ -633,7 +633,7 @@ def self_test():
             failed += 1
             print(f"  [FAIL] {name}: got {actual!r}, expected {expected!r}")
 
-    print("=== swap_ref self-test ===\n")
+    print("=== liftVcf self-test ===\n")
 
     # --- parse_gt ---
     print("[parse_gt]")

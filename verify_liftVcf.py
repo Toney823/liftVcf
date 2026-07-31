@@ -6,7 +6,7 @@ verify_swap.py — 验证 VCF 参考基因组互换的正确性
   1. 遗传距离矩阵（应完全一致）
   2. 系统发育树拓扑结构（应完全一致）
 
-来验证 swap_ref 变换的正确性。
+来验证 liftVcf 变换的正确性。
 
 用法:
   python verify_swap.py original.vcf.gz swapped.vcf.gz --sample 1_H3
@@ -229,7 +229,7 @@ def verify(original_vcf, swapped_vcf, sample_name, new_sample_name='ORIGINAL_REF
             print(f"  [FAIL] {msg}", file=sys.stderr)
 
     log(f"\n{'='*60}")
-    log(f"  swap_ref 验证")
+    log(f"  liftVcf 验证")
     log(f"  原始 VCF:  {original_vcf}")
     log(f"  交换 VCF:  {swapped_vcf}")
     log(f"  目标样品:  {sample_name}")
@@ -392,7 +392,7 @@ def verify(original_vcf, swapped_vcf, sample_name, new_sample_name='ORIGINAL_REF
     log(f"\n{'='*60}")
     if all_ok:
         log(f"  验证结果: 全部通过 ✓")
-        log(f"  结论: swap_ref 变换正确，遗传距离和树拓扑结构得以保持")
+        log(f"  结论: liftVcf 变换正确，遗传距离和树拓扑结构得以保持")
     else:
         log(f"  验证结果: 存在失败项 ✗")
     log(f"{'='*60}\n")
@@ -420,7 +420,7 @@ def swap_and_verify(input_vcf, sample_name, strategy='strict', new_sample_name='
 
     log = lambda msg: not quiet and print(msg, file=sys.stderr)
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    swap_script = os.path.join(script_dir, 'swap_ref.py')
+    swap_script = os.path.join(script_dir, 'liftVcf.py')
 
     def run_swap(input_file, sample, out, ref_name, extra_args=None):
         cmd = [sys.executable, swap_script, input_file, '--sample', sample,
@@ -430,7 +430,7 @@ def swap_and_verify(input_vcf, sample_name, strategy='strict', new_sample_name='
         result = subprocess.run(cmd, capture_output=True, text=True,
                                 encoding='utf-8', errors='replace')
         if result.returncode != 0:
-            print(f"ERROR: swap_ref failed:\n{result.stderr}", file=sys.stderr)
+            print(f"ERROR: liftVcf failed:\n{result.stderr}", file=sys.stderr)
             return False
         return True
 
@@ -512,7 +512,7 @@ def verify_round_trip(original_vcf, restored_vcf, orig_sample, ref_sample_name,
         all_ok = False
 
     if all_ok:
-        log(f"  [PASS] Round-trip 验证通过: swap_ref 变换可逆")
+        log(f"  [PASS] Round-trip 验证通过: liftVcf 变换可逆")
     else:
         log(f"  [FAIL] Round-trip 验证失败")
 
@@ -525,7 +525,7 @@ def verify_round_trip(original_vcf, restored_vcf, orig_sample, ref_sample_name,
 
 def main():
     parser = argparse.ArgumentParser(
-        description='验证 swap_ref 的正确性（IBS 距离矩阵 + 树拓扑 + round-trip）',
+        description='验证 liftVcf 的正确性（IBS 距离矩阵 + 树拓扑 + round-trip）',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
