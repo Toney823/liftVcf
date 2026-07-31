@@ -18,6 +18,24 @@ python3 swap_ref.py toy.vcf.gz --sample 1_H3
 python3 verify_swap.py toy.vcf.gz --swap --sample 1_H3
 ```
 
+## 工作流程
+
+```mermaid
+flowchart TD
+    A["📁 输入: 多样品 VCF"] --> B["🎯 选定样品 (如 1_H3)"]
+    B --> C{"逐位点读取<br/>1_H3 的基因型"}
+    C -->|"0/0 (纯合REF)"| D["↳ 不动"]
+    C -->|"1/1 (纯合ALT)"| E["🔀 交换<br/>ALT → 新 REF<br/>旧 REF → 新 ALT<br/>重编码所有样品 GT"]
+    C -->|"0/1 (杂合)"| F["↳ 不动<br/>(样品携带两种碱基)"]
+    C -->|"./. (缺失)"| G["↳ 跳过"]
+    D --> H["🧬 添加 ORIGINAL_REF 列<br/>(原始参考作为伪样品保留)"]
+    E --> H
+    F --> H
+    G --> H
+    H --> I["📁 输出: 重定向后的 VCF"]
+    I --> J["✅ 验证<br/>IBS 矩阵一致 · 树拓扑一致 · round-trip 可逆"]
+```
+
 ## 它做了什么？
 
 假设你选了样品 `1_H3`，对每个变异位点：

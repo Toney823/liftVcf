@@ -18,7 +18,25 @@ python3 swap_ref.py toy.vcf.gz --sample 1_H3
 python3 verify_swap.py toy.vcf.gz --swap --sample 1_H3
 ```
 
-## What It Does
+## How It Works
+
+```mermaid
+flowchart TD
+    A["📁 Input: multi-sample VCF"] --> B["🎯 Pick sample (e.g. 1_H3)"]
+    B --> C{"For each variant site:<br/>read 1_H3 genotype"}
+    C -->|"0/0 (homo REF)"| D["↳ unchanged"]
+    C -->|"1/1 (homo ALT)"| E["🔀 SWAP<br/>ALT → new REF<br/>old REF → new ALT<br/>recode all GTs"]
+    C -->|"0/1 (heterozygous)"| F["↳ unchanged<br/>(sample carries both alleles)"]
+    C -->|"./. (missing)"| G["↳ skip"]
+    D --> H["🧬 Add ORIGINAL_REF column<br/>(original reference as pseudo-sample)"]
+    E --> H
+    F --> H
+    G --> H
+    H --> I["📁 Output: reoriented VCF"]
+    I --> J["✅ Verify<br/>IBS matrix identical · tree topology identical · round-trip reversible"]
+```
+
+## Behavior by Genotype
 
 Say you pick sample `1_H3`. At each variant site:
 
