@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "liftvcf"
+version = "1.0.0"
+description = "Pick a sample from VCF as the new reference allele set"
+readme = "README.md"
+license = {file = "LICENSE"}
+authors = [
+    {name = "Yuxi Kai", email = "yuxi.kai@163.com"},
+]
+keywords = ["vcf", "bioinformatics", "genomics", "reference-genome", "allele-reorientation"]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "numpy",
+    "scipy",
+]
+
+[project.urls]
+Repository = "https://github.com/Toney823/liftVcf"
+
+[project.scripts]
+liftVcf = "liftVcf:main"
+verify-liftVcf = "verify_liftVcf:main"
+
+[tool.setuptools]
+py-modules = ["liftVcf", "verify_liftVcf"]
